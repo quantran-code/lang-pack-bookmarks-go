@@ -21,6 +21,9 @@ import (
 const (
 	maxTitleLength = 200
 	maxURLLength   = 2048
+	// totalCountHeader carries the number of bookmarks matching the request's filter before limit
+	// and offset are applied.
+	totalCountHeader = "X-Total-Count"
 )
 
 // bookmarkRequest is the body accepted when a bookmark is created.
@@ -120,38 +123,48 @@ func createBookmark(q *dbgen.Queries) http.HandlerFunc {
 	}
 }
 
-// listBookmarks handles GET /bookmarks: every bookmark, oldest first, or — when a valid ?tag= is
-// given — only the bookmarks carrying that tag. The slice is made up front so an empty result
-// marshals as [] and not null. A tag value that is not a valid tag cannot match anything, so it
-// answers [] without running a query. Tags come from one query for the whole page, so listing
-// bookmarks never runs a query per bookmark.
+// listBookmarks handles GET /bookmarks: one page of the bookmarks, sorted as the request asks, or —
+// when a valid ?tag= is given — one page of the bookmarks carrying that tag. The paging and
+// sorting parameters are validated before the tag is looked at, so a bad limit is a 400 even next
+// to an unusable tag. Every 200 answer carries X-Total-Count, the number of bookmarks matching the
+// filter before limit and offset are applied, and a JSON array body: the slice is made up front so
+// an empty result marshals as [] and not null. A tag value that is not a valid tag cannot match
+// anything, so it answers [] with a count of zero without running a query. Tags come from one query
+// for the whole table, so listing bookmarks never runs a query per bookmark.
 func listBookmarks(q *dbgen.Queries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		params, err := parseListParams(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		responses := make([]bookmarkResponse, 0)
 
-		var bookmarks []dbgen.Bookmark
+		tag := ""
+		filtered := false
 		if values, ok := r.URL.Query()["tag"]; ok {
-			name := ""
+			filtered = true
 			if len(values) > 0 {
-				name = values[0]
+				tag = values[0]
 			}
-			if !validTag(name) {
+			if !validTag(tag) {
+				w.Header().Set(totalCountHeader, "0")
 				writeJSON(w, http.StatusOK, responses)
 				return
 			}
-			filtered, err := q.ListBookmarksByTag(r.Context(), name)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "listing bookmarks")
-				return
-			}
-			bookmarks = filtered
-		} else {
-			listed, err := q.ListBookmarks(r.Context())
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "listing bookmarks")
-				return
-			}
-			bookmarks = listed
+		}
+
+		total, err := countBookmarks(r.Context(), q, tag, filtered)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "counting bookmarks")
+			return
+		}
+
+		bookmarks, err := bookmarksPage(r.Context(), q, params, tag, filtered)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "listing bookmarks")
+			return
 		}
 
 		tagsByBookmark, err := loadAllBookmarkTags(r.Context(), q)
@@ -162,8 +175,89 @@ func listBookmarks(q *dbgen.Queries) http.HandlerFunc {
 		for _, bookmark := range bookmarks {
 			responses = append(responses, toBookmarkResponse(bookmark, tagsByBookmark[bookmark.ID]))
 		}
+
+		// The header is set before writeJSON writes the status line, or it would never reach the
+		// client.
+		w.Header().Set(totalCountHeader, strconv.FormatInt(total, 10))
 		writeJSON(w, http.StatusOK, responses)
 	}
+}
+
+// bookmarksPage runs the one generated query that matches p: the tag-filtered variant when
+// filtered is true, the plain variant otherwise. Every sort field and direction has a query of its
+// own, so this switch picks a method and never builds SQL from strings.
+func bookmarksPage(ctx context.Context, q *dbgen.Queries, p listParams, tag string, filtered bool) ([]dbgen.Bookmark, error) {
+	limit := int64(p.Limit)
+	offset := int64(p.Offset)
+
+	if filtered {
+		switch p.Sort {
+		case sortByTitle:
+			switch p.Order {
+			case orderAsc:
+				return q.ListBookmarksByTagByTitle(ctx, dbgen.ListBookmarksByTagByTitleParams{Name: tag, Limit: limit, Offset: offset})
+			case orderDesc:
+				return q.ListBookmarksByTagByTitleDesc(ctx, dbgen.ListBookmarksByTagByTitleDescParams{Name: tag, Limit: limit, Offset: offset})
+			}
+		case sortByCreatedAt:
+			switch p.Order {
+			case orderAsc:
+				return q.ListBookmarksByTagByCreatedAt(ctx, dbgen.ListBookmarksByTagByCreatedAtParams{Name: tag, Limit: limit, Offset: offset})
+			case orderDesc:
+				return q.ListBookmarksByTagByCreatedAtDesc(ctx, dbgen.ListBookmarksByTagByCreatedAtDescParams{Name: tag, Limit: limit, Offset: offset})
+			}
+		case sortByID:
+			switch p.Order {
+			case orderAsc:
+				return q.ListBookmarksByTagByID(ctx, dbgen.ListBookmarksByTagByIDParams{Name: tag, Limit: limit, Offset: offset})
+			case orderDesc:
+				return q.ListBookmarksByTagByIDDesc(ctx, dbgen.ListBookmarksByTagByIDDescParams{Name: tag, Limit: limit, Offset: offset})
+			}
+		}
+		return nil, fmt.Errorf("unsupported listing of tag %q: sort %q, order %q", tag, p.Sort, p.Order)
+	}
+
+	switch p.Sort {
+	case sortByTitle:
+		switch p.Order {
+		case orderAsc:
+			return q.ListBookmarksByTitle(ctx, dbgen.ListBookmarksByTitleParams{Limit: limit, Offset: offset})
+		case orderDesc:
+			return q.ListBookmarksByTitleDesc(ctx, dbgen.ListBookmarksByTitleDescParams{Limit: limit, Offset: offset})
+		}
+	case sortByCreatedAt:
+		switch p.Order {
+		case orderAsc:
+			return q.ListBookmarksByCreatedAt(ctx, dbgen.ListBookmarksByCreatedAtParams{Limit: limit, Offset: offset})
+		case orderDesc:
+			return q.ListBookmarksByCreatedAtDesc(ctx, dbgen.ListBookmarksByCreatedAtDescParams{Limit: limit, Offset: offset})
+		}
+	case sortByID:
+		switch p.Order {
+		case orderAsc:
+			return q.ListBookmarksByID(ctx, dbgen.ListBookmarksByIDParams{Limit: limit, Offset: offset})
+		case orderDesc:
+			return q.ListBookmarksByIDDesc(ctx, dbgen.ListBookmarksByIDDescParams{Limit: limit, Offset: offset})
+		}
+	}
+	return nil, fmt.Errorf("unsupported listing: sort %q, order %q", p.Sort, p.Order)
+}
+
+// countBookmarks counts the bookmarks the request covers — all of them, or only those carrying tag
+// — before limit and offset are applied.
+func countBookmarks(ctx context.Context, q *dbgen.Queries, tag string, filtered bool) (int64, error) {
+	if filtered {
+		total, err := q.CountBookmarksByTag(ctx, tag)
+		if err != nil {
+			return 0, fmt.Errorf("counting bookmarks carrying tag %s: %w", tag, err)
+		}
+		return total, nil
+	}
+	total, err := q.CountBookmarks(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("counting bookmarks: %w", err)
+	}
+	return total, nil
 }
 
 // loadAllBookmarkTags loads every bookmark's tags in one query, grouped by bookmark id. The names
