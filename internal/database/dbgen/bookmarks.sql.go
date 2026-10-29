@@ -34,6 +34,18 @@ func (q *Queries) CreateBookmark(ctx context.Context, arg CreateBookmarkParams) 
 	return i, err
 }
 
+const deleteBookmark = `-- name: DeleteBookmark :execrows
+DELETE FROM bookmarks WHERE id = ?
+`
+
+func (q *Queries) DeleteBookmark(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteBookmark, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getBookmark = `-- name: GetBookmark :one
 SELECT id, url, title, created_at FROM bookmarks WHERE id = ?
 `
@@ -80,4 +92,26 @@ func (q *Queries) ListBookmarks(ctx context.Context) ([]Bookmark, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateBookmark = `-- name: UpdateBookmark :one
+UPDATE bookmarks SET url = ?, title = ? WHERE id = ? RETURNING id, url, title, created_at
+`
+
+type UpdateBookmarkParams struct {
+	Url   string `json:"url"`
+	Title string `json:"title"`
+	ID    int64  `json:"id"`
+}
+
+func (q *Queries) UpdateBookmark(ctx context.Context, arg UpdateBookmarkParams) (Bookmark, error) {
+	row := q.db.QueryRowContext(ctx, updateBookmark, arg.Url, arg.Title, arg.ID)
+	var i Bookmark
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.Title,
+		&i.CreatedAt,
+	)
+	return i, err
 }

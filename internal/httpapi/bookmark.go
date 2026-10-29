@@ -94,11 +94,91 @@ func listBookmarks(q *dbgen.Queries) http.HandlerFunc {
 	}
 }
 
+// updateBookmark handles PUT /bookmarks/{id}: it replaces an existing bookmark's url and title and
+// answers with the updated bookmark. The id is parsed and the bookmark loaded before the body is
+// read, so a missing bookmark is a 404 even when the body is malformed or fails validation.
+func updateBookmark(q *dbgen.Queries) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := parseBookmarkID(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid bookmark id")
+			return
+		}
+
+		if _, err := q.GetBookmark(r.Context(), id); errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "bookmark not found")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "loading bookmark")
+			return
+		}
+
+		var req bookmarkRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if err := req.validate(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		bookmark, err := q.UpdateBookmark(r.Context(), dbgen.UpdateBookmarkParams{
+			Url:   strings.TrimSpace(req.URL),
+			Title: strings.TrimSpace(req.Title),
+			ID:    id,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "bookmark not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "updating bookmark")
+			return
+		}
+		writeJSON(w, http.StatusOK, bookmark)
+	}
+}
+
+// deleteBookmark handles DELETE /bookmarks/{id}: it removes an existing bookmark and answers 204
+// with no body at all. A returned row count of zero covers both "never existed" and "already
+// deleted", and is answered like a missing bookmark.
+func deleteBookmark(q *dbgen.Queries) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := parseBookmarkID(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid bookmark id")
+			return
+		}
+
+		deleted, err := q.DeleteBookmark(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "deleting bookmark")
+			return
+		}
+		if deleted == 0 {
+			writeError(w, http.StatusNotFound, "bookmark not found")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// parseBookmarkID reads the {id} path parameter of a bookmark route. A non-numeric or non-positive
+// id is an error.
+func parseBookmarkID(r *http.Request) (int64, error) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id < 1 {
+		return 0, errors.New("invalid bookmark id")
+	}
+	return id, nil
+}
+
 // getBookmark handles GET /bookmarks/{id}. A non-numeric id is a 400, a missing bookmark a 404.
 func getBookmark(q *dbgen.Queries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil || id < 1 {
+		id, err := parseBookmarkID(r)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid bookmark id")
 			return
 		}

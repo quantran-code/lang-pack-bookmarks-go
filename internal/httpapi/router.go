@@ -51,6 +51,8 @@ func NewRouter(db *sql.DB) http.Handler {
 		r.Post("/", createBookmark(queries))
 		r.Get("/", listBookmarks(queries))
 		r.Get("/{id}", getBookmark(queries))
+		r.Put("/{id}", updateBookmark(queries))
+		r.Delete("/{id}", deleteBookmark(queries))
 	})
 	return r
 }
