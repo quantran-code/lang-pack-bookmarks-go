@@ -30,6 +30,13 @@ func Open(dsn string) (*sql.DB, error) {
 	}
 	db.SetMaxOpenConns(1)
 
+	// SQLite only enforces ON DELETE CASCADE when foreign keys are switched on, and the pragma is
+	// per connection, so it is set on the one pooled connection before anything else uses it.
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enabling foreign keys: %w", err)
+	}
+
 	if err := migrateUp(db); err != nil {
 		_ = db.Close()
 		return nil, err

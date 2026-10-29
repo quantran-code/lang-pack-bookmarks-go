@@ -14,3 +14,13 @@ type Bookmark struct {
 	Title     string    `json:"title"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type BookmarkTag struct {
+	BookmarkID int64 `json:"bookmark_id"`
+	TagID      int64 `json:"tag_id"`
+}
+
+type Tag struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}

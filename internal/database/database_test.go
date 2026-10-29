@@ -14,10 +14,46 @@ func TestOpenAppliesMigrations(t *testing.T) {
 
 	var version int
 	require.NoError(t, db.QueryRow("SELECT MAX(version_id) FROM goose_db_version").Scan(&version))
-	assert.Equal(t, 1, version)
+	assert.Equal(t, 2, version)
 
-	_, err = db.Exec("INSERT INTO bookmarks (url, title, created_at) VALUES ('https://a', 'b', CURRENT_TIMESTAMP)")
+	result, err := db.Exec("INSERT INTO bookmarks (url, title, created_at) VALUES ('https://a', 'b', CURRENT_TIMESTAMP)")
+	require.NoError(t, err)
+	bookmarkID, err := result.LastInsertId()
+	require.NoError(t, err)
+
+	result, err = db.Exec("INSERT INTO tags (name) VALUES ('go')")
+	require.NoError(t, err)
+	tagID, err := result.LastInsertId()
+	require.NoError(t, err)
+
+	_, err = db.Exec("INSERT INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)", bookmarkID, tagID)
 	assert.NoError(t, err)
+}
+
+func TestDeleteBookmarkCascadesTagLinks(t *testing.T) {
+	db, err := Open(MemoryDSN)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	result, err := db.Exec("INSERT INTO bookmarks (url, title, created_at) VALUES ('https://a', 'b', CURRENT_TIMESTAMP)")
+	require.NoError(t, err)
+	bookmarkID, err := result.LastInsertId()
+	require.NoError(t, err)
+
+	result, err = db.Exec("INSERT INTO tags (name) VALUES ('go')")
+	require.NoError(t, err)
+	tagID, err := result.LastInsertId()
+	require.NoError(t, err)
+
+	_, err = db.Exec("INSERT INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)", bookmarkID, tagID)
+	require.NoError(t, err)
+
+	_, err = db.Exec("DELETE FROM bookmarks WHERE id = ?", bookmarkID)
+	require.NoError(t, err)
+
+	var n int
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM bookmark_tags").Scan(&n))
+	assert.Equal(t, 0, n)
 }
 
 func TestOpenGivesEachCallItsOwnDatabase(t *testing.T) {
