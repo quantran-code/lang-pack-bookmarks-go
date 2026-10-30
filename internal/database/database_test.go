@@ -3,6 +3,7 @@ package database
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,14 +15,13 @@ func TestOpenAppliesMigrations(t *testing.T) {
 
 	var version int
 	require.NoError(t, db.QueryRow("SELECT MAX(version_id) FROM goose_db_version").Scan(&version))
-	assert.Equal(t, 2, version)
+	assert.Equal(t, 3, version)
 
-	result, err := db.Exec("INSERT INTO bookmarks (url, title, created_at) VALUES ('https://a', 'b', CURRENT_TIMESTAMP)")
-	require.NoError(t, err)
-	bookmarkID, err := result.LastInsertId()
+	bookmarkID := uuid.NewString()
+	_, err = db.Exec("INSERT INTO bookmarks (id, url, title, created_at) VALUES (?, 'https://a', 'b', CURRENT_TIMESTAMP)", bookmarkID)
 	require.NoError(t, err)
 
-	result, err = db.Exec("INSERT INTO tags (name) VALUES ('go')")
+	result, err := db.Exec("INSERT INTO tags (name) VALUES ('go')")
 	require.NoError(t, err)
 	tagID, err := result.LastInsertId()
 	require.NoError(t, err)
@@ -35,12 +35,11 @@ func TestDeleteBookmarkCascadesTagLinks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	result, err := db.Exec("INSERT INTO bookmarks (url, title, created_at) VALUES ('https://a', 'b', CURRENT_TIMESTAMP)")
-	require.NoError(t, err)
-	bookmarkID, err := result.LastInsertId()
+	bookmarkID := uuid.NewString()
+	_, err = db.Exec("INSERT INTO bookmarks (id, url, title, created_at) VALUES (?, 'https://a', 'b', CURRENT_TIMESTAMP)", bookmarkID)
 	require.NoError(t, err)
 
-	result, err = db.Exec("INSERT INTO tags (name) VALUES ('go')")
+	result, err := db.Exec("INSERT INTO tags (name) VALUES ('go')")
 	require.NoError(t, err)
 	tagID, err := result.LastInsertId()
 	require.NoError(t, err)
@@ -64,7 +63,7 @@ func TestOpenGivesEachCallItsOwnDatabase(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = second.Close() })
 
-	_, err = first.Exec("INSERT INTO bookmarks (url, title, created_at) VALUES ('https://a', 'b', CURRENT_TIMESTAMP)")
+	_, err = first.Exec("INSERT INTO bookmarks (id, url, title, created_at) VALUES (?, 'https://a', 'b', CURRENT_TIMESTAMP)", uuid.NewString())
 	require.NoError(t, err)
 
 	var n int

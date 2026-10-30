@@ -11,6 +11,8 @@ import (
 
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
+
+	"github.com/quantran-code/lang-pack-bookmarks-go/internal/database/migrations"
 )
 
 //go:embed migrations/*.sql
@@ -44,14 +46,34 @@ func Open(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-func migrateUp(db *sql.DB) error {
-	migrations, err := fs.Sub(migrationsFS, "migrations")
+// newMigrationProvider builds the goose provider for the embedded SQL migrations plus the Go
+// migration that moves bookmarks to UUID ids, which cannot be expressed in SQL: it needs a fresh
+// uuid.NewString() per existing bookmark.
+func newMigrationProvider(db *sql.DB) (*goose.Provider, error) {
+	migrationsFSys, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
-		return fmt.Errorf("reading migrations: %w", err)
+		return nil, fmt.Errorf("reading migrations: %w", err)
 	}
-	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrations)
+	provider, err := goose.NewProvider(
+		goose.DialectSQLite3,
+		db,
+		migrationsFSys,
+		goose.WithGoMigrations(goose.NewGoMigration(
+			3,
+			&goose.GoFunc{RunTx: migrations.UpBookmarksUUID},
+			&goose.GoFunc{RunTx: migrations.DownBookmarksUUID},
+		)),
+	)
 	if err != nil {
-		return fmt.Errorf("creating migration provider: %w", err)
+		return nil, fmt.Errorf("creating migration provider: %w", err)
+	}
+	return provider, nil
+}
+
+func migrateUp(db *sql.DB) error {
+	provider, err := newMigrationProvider(db)
+	if err != nil {
+		return err
 	}
 	if _, err := provider.Up(context.Background()); err != nil {
 		return fmt.Errorf("applying migrations: %w", err)

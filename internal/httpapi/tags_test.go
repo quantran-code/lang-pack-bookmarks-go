@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -55,42 +56,43 @@ func tagNames(n int) []string {
 
 var _ = Describe("PUT /bookmarks/{id}/tags", func() {
 	var router http.Handler
+	var id string
 
 	BeforeEach(func() {
 		router = newTestRouter()
-		Expect(do(router, http.MethodPost, "/bookmarks", `{"url":"https://go.dev","title":"Go"}`).Code).To(Equal(http.StatusCreated))
+		id = postBookmark(router, "https://go.dev", "Go")
 	})
 
 	It("replaces the tag set and answers with the bookmark", func() {
-		rec := do(router, http.MethodPut, "/bookmarks/1/tags", `{"tags":["go","chi"]}`)
+		rec := do(router, http.MethodPut, "/bookmarks/"+id+"/tags", `{"tags":["go","chi"]}`)
 		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
 
 		var replaced bookmarkResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &replaced)).To(Succeed())
-		Expect(replaced.ID).To(BeEquivalentTo(1))
+		Expect(replaced.ID).To(Equal(id))
 		Expect(replaced.URL).To(Equal("https://go.dev"))
 		Expect(replaced.Title).To(Equal("Go"))
 		Expect(replaced.CreatedAt.IsZero()).To(BeFalse())
 		Expect(replaced.Tags).To(Equal([]string{"chi", "go"}))
 
-		rec = do(router, http.MethodGet, "/bookmarks/1", "")
+		rec = do(router, http.MethodGet, "/bookmarks/"+id, "")
 		Expect(rec.Code).To(Equal(http.StatusOK))
 		Expect(bookmarkTagsOf(rec.Body.Bytes())).To(Equal([]string{"chi", "go"}))
 	})
 
 	It("replaces instead of adding on a second call", func() {
-		Expect(do(router, http.MethodPut, "/bookmarks/1/tags", tagsBody("go", "chi")).Code).To(Equal(http.StatusOK))
-		Expect(do(router, http.MethodPut, "/bookmarks/1/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
+		Expect(do(router, http.MethodPut, "/bookmarks/"+id+"/tags", tagsBody("go", "chi")).Code).To(Equal(http.StatusOK))
+		Expect(do(router, http.MethodPut, "/bookmarks/"+id+"/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
 
-		rec := do(router, http.MethodGet, "/bookmarks/1", "")
+		rec := do(router, http.MethodGet, "/bookmarks/"+id, "")
 		Expect(rec.Code).To(Equal(http.StatusOK))
 		Expect(bookmarkTagsOf(rec.Body.Bytes())).To(Equal([]string{"go"}))
 	})
 
 	It("clears every tag when the set is empty", func() {
-		Expect(do(router, http.MethodPut, "/bookmarks/1/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
+		Expect(do(router, http.MethodPut, "/bookmarks/"+id+"/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
 
-		rec := do(router, http.MethodPut, "/bookmarks/1/tags", `{"tags":[]}`)
+		rec := do(router, http.MethodPut, "/bookmarks/"+id+"/tags", `{"tags":[]}`)
 		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
 		raw, err := rawTags(rec.Body.Bytes())
 		Expect(err).NotTo(HaveOccurred())
@@ -98,20 +100,20 @@ var _ = Describe("PUT /bookmarks/{id}/tags", func() {
 	})
 
 	It("counts a duplicate once", func() {
-		rec := do(router, http.MethodPut, "/bookmarks/1/tags", `{"tags":["go","go"]}`)
+		rec := do(router, http.MethodPut, "/bookmarks/"+id+"/tags", `{"tags":["go","go"]}`)
 		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
 		Expect(bookmarkTagsOf(rec.Body.Bytes())).To(Equal([]string{"go"}))
 	})
 
 	It("accepts exactly 10 distinct tags", func() {
-		rec := do(router, http.MethodPut, "/bookmarks/1/tags", tagsBody(tagNames(10)...))
+		rec := do(router, http.MethodPut, "/bookmarks/"+id+"/tags", tagsBody(tagNames(10)...))
 		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
 		Expect(bookmarkTagsOf(rec.Body.Bytes())).To(Equal(tagNames(10)))
 	})
 
 	DescribeTable("rejects a body",
 		func(body string, status int, message string) {
-			rec := do(router, http.MethodPut, "/bookmarks/1/tags", body)
+			rec := do(router, http.MethodPut, "/bookmarks/"+id+"/tags", body)
 			Expect(rec.Code).To(Equal(status), rec.Body.String())
 			Expect(rec.Body.String()).To(MatchJSON(`{"error":"` + message + `"}`))
 		},
@@ -127,13 +129,13 @@ var _ = Describe("PUT /bookmarks/{id}/tags", func() {
 	)
 
 	It("leaves the previous tags alone when the request is rejected", func() {
-		Expect(do(router, http.MethodPut, "/bookmarks/1/tags", tagsBody("go", "chi")).Code).To(Equal(http.StatusOK))
+		Expect(do(router, http.MethodPut, "/bookmarks/"+id+"/tags", tagsBody("go", "chi")).Code).To(Equal(http.StatusOK))
 
-		rec := do(router, http.MethodPut, "/bookmarks/1/tags", tagsBody("chi", "Go"))
+		rec := do(router, http.MethodPut, "/bookmarks/"+id+"/tags", tagsBody("chi", "Go"))
 		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
 		Expect(rec.Body.String()).To(MatchJSON(`{"error":"` + tagFormatError + `"}`))
 
-		rec = do(router, http.MethodGet, "/bookmarks/1", "")
+		rec = do(router, http.MethodGet, "/bookmarks/"+id, "")
 		Expect(rec.Code).To(Equal(http.StatusOK))
 		Expect(bookmarkTagsOf(rec.Body.Bytes())).To(Equal([]string{"chi", "go"}))
 	})
@@ -144,27 +146,28 @@ var _ = Describe("PUT /bookmarks/{id}/tags", func() {
 			Expect(rec.Code).To(Equal(status), rec.Body.String())
 			Expect(rec.Body.String()).To(MatchJSON(`{"error":"` + message + `"}`))
 		},
-		Entry("not a number", "/bookmarks/abc/tags", tagsBody("go"), http.StatusBadRequest, "invalid bookmark id"),
+		Entry("not a UUID", "/bookmarks/abc/tags", tagsBody("go"), http.StatusBadRequest, "invalid bookmark id"),
 		Entry("zero", "/bookmarks/0/tags", tagsBody("go"), http.StatusBadRequest, "invalid bookmark id"),
-		Entry("missing", "/bookmarks/99/tags", tagsBody("go"), http.StatusNotFound, "bookmark not found"),
-		Entry("missing, invalid body", "/bookmarks/99/tags", `{"tags":null}`, http.StatusNotFound, "bookmark not found"),
-		Entry("missing, malformed JSON", "/bookmarks/99/tags", `{"tags":`, http.StatusNotFound, "bookmark not found"),
+		Entry("missing", "/bookmarks/"+uuid.NewString()+"/tags", tagsBody("go"), http.StatusNotFound, "bookmark not found"),
+		Entry("missing, invalid body", "/bookmarks/"+uuid.NewString()+"/tags", `{"tags":null}`, http.StatusNotFound, "bookmark not found"),
+		Entry("missing, malformed JSON", "/bookmarks/"+uuid.NewString()+"/tags", `{"tags":`, http.StatusNotFound, "bookmark not found"),
 	)
 })
 
 var _ = Describe("GET /bookmarks with a tag filter", func() {
 	var router http.Handler
+	var first, second, third string
 
 	BeforeEach(func() {
 		router = newTestRouter()
 
-		Expect(do(router, http.MethodPost, "/bookmarks", `{"url":"https://a.example","title":"first"}`).Code).To(Equal(http.StatusCreated))
-		Expect(do(router, http.MethodPost, "/bookmarks", `{"url":"https://b.example","title":"second"}`).Code).To(Equal(http.StatusCreated))
-		Expect(do(router, http.MethodPost, "/bookmarks", `{"url":"https://c.example","title":"third"}`).Code).To(Equal(http.StatusCreated))
+		first = postBookmark(router, "https://a.example", "first")
+		second = postBookmark(router, "https://b.example", "second")
+		third = postBookmark(router, "https://c.example", "third")
 
-		Expect(do(router, http.MethodPut, "/bookmarks/1/tags", tagsBody("go", "chi")).Code).To(Equal(http.StatusOK))
-		Expect(do(router, http.MethodPut, "/bookmarks/2/tags", tagsBody("chi")).Code).To(Equal(http.StatusOK))
-		Expect(do(router, http.MethodPut, "/bookmarks/3/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
+		Expect(do(router, http.MethodPut, "/bookmarks/"+first+"/tags", tagsBody("go", "chi")).Code).To(Equal(http.StatusOK))
+		Expect(do(router, http.MethodPut, "/bookmarks/"+second+"/tags", tagsBody("chi")).Code).To(Equal(http.StatusOK))
+		Expect(do(router, http.MethodPut, "/bookmarks/"+third+"/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
 	})
 
 	It("lists only the bookmarks carrying the tag, oldest first, with all their tags", func() {
@@ -174,8 +177,10 @@ var _ = Describe("GET /bookmarks with a tag filter", func() {
 		var bookmarks []bookmarkResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &bookmarks)).To(Succeed())
 		Expect(bookmarks).To(HaveLen(2))
+		Expect(bookmarks[0].ID).To(Equal(first))
 		Expect(bookmarks[0].Title).To(Equal("first"))
 		Expect(bookmarks[0].Tags).To(Equal([]string{"chi", "go"}))
+		Expect(bookmarks[1].ID).To(Equal(third))
 		Expect(bookmarks[1].Title).To(Equal("third"))
 		Expect(bookmarks[1].Tags).To(Equal([]string{"go"}))
 	})
@@ -187,6 +192,7 @@ var _ = Describe("GET /bookmarks with a tag filter", func() {
 		var bookmarks []bookmarkResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &bookmarks)).To(Succeed())
 		Expect(bookmarks).To(HaveLen(3))
+		Expect(bookmarks[1].ID).To(Equal(second))
 		Expect(bookmarks[1].Title).To(Equal("second"))
 		Expect(bookmarks[1].Tags).To(Equal([]string{"chi"}))
 	})
@@ -212,14 +218,15 @@ var _ = Describe("GET /bookmarks with a tag filter", func() {
 
 var _ = Describe("the tags field on bookmark responses", func() {
 	var router http.Handler
+	var id string
 
 	BeforeEach(func() {
 		router = newTestRouter()
-		Expect(do(router, http.MethodPost, "/bookmarks", `{"url":"https://go.dev","title":"Go"}`).Code).To(Equal(http.StatusCreated))
+		id = postBookmark(router, "https://go.dev", "Go")
 	})
 
 	It("is the raw JSON [] and never null on a bookmark with no tags", func() {
-		rec := do(router, http.MethodGet, "/bookmarks/1", "")
+		rec := do(router, http.MethodGet, "/bookmarks/"+id, "")
 		Expect(rec.Code).To(Equal(http.StatusOK))
 		raw, err := rawTags(rec.Body.Bytes())
 		Expect(err).NotTo(HaveOccurred())
@@ -242,21 +249,21 @@ var _ = Describe("the tags field on bookmark responses", func() {
 	})
 
 	It("is a sorted array once tags are set", func() {
-		Expect(do(router, http.MethodPut, "/bookmarks/1/tags", tagsBody("go", "chi", "bookmarks")).Code).To(Equal(http.StatusOK))
+		Expect(do(router, http.MethodPut, "/bookmarks/"+id+"/tags", tagsBody("go", "chi", "bookmarks")).Code).To(Equal(http.StatusOK))
 
-		rec := do(router, http.MethodGet, "/bookmarks/1", "")
+		rec := do(router, http.MethodGet, "/bookmarks/"+id, "")
 		Expect(rec.Code).To(Equal(http.StatusOK))
 		Expect(bookmarkTagsOf(rec.Body.Bytes())).To(Equal([]string{"bookmarks", "chi", "go"}))
 	})
 
 	It("is carried by PUT /bookmarks/{id} and unchanged by a tags key in its body", func() {
-		Expect(do(router, http.MethodPut, "/bookmarks/1/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
+		Expect(do(router, http.MethodPut, "/bookmarks/"+id+"/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
 
-		rec := do(router, http.MethodPut, "/bookmarks/1", `{"url":"https://go.dev/blog","title":"The Go Blog","tags":["ignored"]}`)
+		rec := do(router, http.MethodPut, "/bookmarks/"+id, `{"url":"https://go.dev/blog","title":"The Go Blog","tags":["ignored"]}`)
 		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
 		Expect(bookmarkTagsOf(rec.Body.Bytes())).To(Equal([]string{"go"}))
 
-		rec = do(router, http.MethodGet, "/bookmarks/1", "")
+		rec = do(router, http.MethodGet, "/bookmarks/"+id, "")
 		Expect(rec.Code).To(Equal(http.StatusOK))
 		Expect(bookmarkTagsOf(rec.Body.Bytes())).To(Equal([]string{"go"}))
 	})

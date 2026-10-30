@@ -7,6 +7,7 @@ package dbgen
 
 import (
 	"context"
+	"time"
 )
 
 const addBookmarkTag = `-- name: AddBookmarkTag :exec
@@ -14,7 +15,7 @@ INSERT INTO bookmark_tags (bookmark_id, tag_id) SELECT ?1, id FROM tags WHERE na
 `
 
 type AddBookmarkTagParams struct {
-	BookmarkID int64  `json:"bookmark_id"`
+	BookmarkID string `json:"bookmark_id"`
 	TagName    string `json:"tag_name"`
 }
 
@@ -38,7 +39,7 @@ const deleteBookmarkTags = `-- name: DeleteBookmarkTags :exec
 DELETE FROM bookmark_tags WHERE bookmark_id = ?1
 `
 
-func (q *Queries) DeleteBookmarkTags(ctx context.Context, bookmarkID int64) error {
+func (q *Queries) DeleteBookmarkTags(ctx context.Context, bookmarkID string) error {
 	_, err := q.db.ExecContext(ctx, deleteBookmarkTags, bookmarkID)
 	return err
 }
@@ -57,7 +58,7 @@ SELECT bookmark_tags.bookmark_id, tags.name FROM bookmark_tags JOIN tags ON tags
 `
 
 type ListAllBookmarkTagsRow struct {
-	BookmarkID int64  `json:"bookmark_id"`
+	BookmarkID string `json:"bookmark_id"`
 	Name       string `json:"name"`
 }
 
@@ -94,15 +95,22 @@ type ListBookmarksByTagByCreatedAtParams struct {
 	Limit  int64  `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByTagByCreatedAt(ctx context.Context, arg ListBookmarksByTagByCreatedAtParams) ([]Bookmark, error) {
+type ListBookmarksByTagByCreatedAtRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByTagByCreatedAt(ctx context.Context, arg ListBookmarksByTagByCreatedAtParams) ([]ListBookmarksByTagByCreatedAtRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByTagByCreatedAt, arg.Name, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByTagByCreatedAtRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByTagByCreatedAtRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -132,15 +140,22 @@ type ListBookmarksByTagByCreatedAtDescParams struct {
 	Limit  int64  `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByTagByCreatedAtDesc(ctx context.Context, arg ListBookmarksByTagByCreatedAtDescParams) ([]Bookmark, error) {
+type ListBookmarksByTagByCreatedAtDescRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByTagByCreatedAtDesc(ctx context.Context, arg ListBookmarksByTagByCreatedAtDescParams) ([]ListBookmarksByTagByCreatedAtDescRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByTagByCreatedAtDesc, arg.Name, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByTagByCreatedAtDescRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByTagByCreatedAtDescRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -170,15 +185,22 @@ type ListBookmarksByTagByIDParams struct {
 	Limit  int64  `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByTagByID(ctx context.Context, arg ListBookmarksByTagByIDParams) ([]Bookmark, error) {
+type ListBookmarksByTagByIDRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByTagByID(ctx context.Context, arg ListBookmarksByTagByIDParams) ([]ListBookmarksByTagByIDRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByTagByID, arg.Name, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByTagByIDRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByTagByIDRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -208,15 +230,22 @@ type ListBookmarksByTagByIDDescParams struct {
 	Limit  int64  `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByTagByIDDesc(ctx context.Context, arg ListBookmarksByTagByIDDescParams) ([]Bookmark, error) {
+type ListBookmarksByTagByIDDescRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByTagByIDDesc(ctx context.Context, arg ListBookmarksByTagByIDDescParams) ([]ListBookmarksByTagByIDDescRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByTagByIDDesc, arg.Name, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByTagByIDDescRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByTagByIDDescRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -246,15 +275,22 @@ type ListBookmarksByTagByTitleParams struct {
 	Limit  int64  `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByTagByTitle(ctx context.Context, arg ListBookmarksByTagByTitleParams) ([]Bookmark, error) {
+type ListBookmarksByTagByTitleRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByTagByTitle(ctx context.Context, arg ListBookmarksByTagByTitleParams) ([]ListBookmarksByTagByTitleRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByTagByTitle, arg.Name, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByTagByTitleRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByTagByTitleRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -284,15 +320,22 @@ type ListBookmarksByTagByTitleDescParams struct {
 	Limit  int64  `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByTagByTitleDesc(ctx context.Context, arg ListBookmarksByTagByTitleDescParams) ([]Bookmark, error) {
+type ListBookmarksByTagByTitleDescRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByTagByTitleDesc(ctx context.Context, arg ListBookmarksByTagByTitleDescParams) ([]ListBookmarksByTagByTitleDescRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByTagByTitleDesc, arg.Name, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByTagByTitleDescRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByTagByTitleDescRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -316,7 +359,7 @@ const listTagsForBookmark = `-- name: ListTagsForBookmark :many
 SELECT tags.name FROM bookmark_tags JOIN tags ON tags.id = bookmark_tags.tag_id WHERE bookmark_tags.bookmark_id = ?1 ORDER BY tags.name
 `
 
-func (q *Queries) ListTagsForBookmark(ctx context.Context, bookmarkID int64) ([]string, error) {
+func (q *Queries) ListTagsForBookmark(ctx context.Context, bookmarkID string) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listTagsForBookmark, bookmarkID)
 	if err != nil {
 		return nil, err

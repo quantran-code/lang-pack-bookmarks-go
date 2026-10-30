@@ -22,20 +22,33 @@ func (q *Queries) CountBookmarks(ctx context.Context) (int64, error) {
 }
 
 const createBookmark = `-- name: CreateBookmark :one
-INSERT INTO bookmarks (url, title, created_at)
-VALUES (?, ?, ?)
+INSERT INTO bookmarks (id, url, title, created_at)
+VALUES (?, ?, ?, ?)
 RETURNING id, url, title, created_at
 `
 
 type CreateBookmarkParams struct {
+	ID        string    `json:"id"`
 	Url       string    `json:"url"`
 	Title     string    `json:"title"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func (q *Queries) CreateBookmark(ctx context.Context, arg CreateBookmarkParams) (Bookmark, error) {
-	row := q.db.QueryRowContext(ctx, createBookmark, arg.Url, arg.Title, arg.CreatedAt)
-	var i Bookmark
+type CreateBookmarkRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) CreateBookmark(ctx context.Context, arg CreateBookmarkParams) (CreateBookmarkRow, error) {
+	row := q.db.QueryRowContext(ctx, createBookmark,
+		arg.ID,
+		arg.Url,
+		arg.Title,
+		arg.CreatedAt,
+	)
+	var i CreateBookmarkRow
 	err := row.Scan(
 		&i.ID,
 		&i.Url,
@@ -49,7 +62,7 @@ const deleteBookmark = `-- name: DeleteBookmark :execrows
 DELETE FROM bookmarks WHERE id = ?
 `
 
-func (q *Queries) DeleteBookmark(ctx context.Context, id int64) (int64, error) {
+func (q *Queries) DeleteBookmark(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteBookmark, id)
 	if err != nil {
 		return 0, err
@@ -61,9 +74,16 @@ const getBookmark = `-- name: GetBookmark :one
 SELECT id, url, title, created_at FROM bookmarks WHERE id = ?
 `
 
-func (q *Queries) GetBookmark(ctx context.Context, id int64) (Bookmark, error) {
+type GetBookmarkRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) GetBookmark(ctx context.Context, id string) (GetBookmarkRow, error) {
 	row := q.db.QueryRowContext(ctx, getBookmark, id)
-	var i Bookmark
+	var i GetBookmarkRow
 	err := row.Scan(
 		&i.ID,
 		&i.Url,
@@ -82,15 +102,22 @@ type ListBookmarksByCreatedAtParams struct {
 	Limit  int64 `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByCreatedAt(ctx context.Context, arg ListBookmarksByCreatedAtParams) ([]Bookmark, error) {
+type ListBookmarksByCreatedAtRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByCreatedAt(ctx context.Context, arg ListBookmarksByCreatedAtParams) ([]ListBookmarksByCreatedAtRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByCreatedAt, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByCreatedAtRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByCreatedAtRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -119,15 +146,22 @@ type ListBookmarksByCreatedAtDescParams struct {
 	Limit  int64 `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByCreatedAtDesc(ctx context.Context, arg ListBookmarksByCreatedAtDescParams) ([]Bookmark, error) {
+type ListBookmarksByCreatedAtDescRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByCreatedAtDesc(ctx context.Context, arg ListBookmarksByCreatedAtDescParams) ([]ListBookmarksByCreatedAtDescRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByCreatedAtDesc, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByCreatedAtDescRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByCreatedAtDescRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -156,15 +190,22 @@ type ListBookmarksByIDParams struct {
 	Limit  int64 `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByID(ctx context.Context, arg ListBookmarksByIDParams) ([]Bookmark, error) {
+type ListBookmarksByIDRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByID(ctx context.Context, arg ListBookmarksByIDParams) ([]ListBookmarksByIDRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByID, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByIDRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByIDRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -193,15 +234,22 @@ type ListBookmarksByIDDescParams struct {
 	Limit  int64 `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByIDDesc(ctx context.Context, arg ListBookmarksByIDDescParams) ([]Bookmark, error) {
+type ListBookmarksByIDDescRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByIDDesc(ctx context.Context, arg ListBookmarksByIDDescParams) ([]ListBookmarksByIDDescRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByIDDesc, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByIDDescRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByIDDescRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -230,15 +278,22 @@ type ListBookmarksByTitleParams struct {
 	Limit  int64 `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByTitle(ctx context.Context, arg ListBookmarksByTitleParams) ([]Bookmark, error) {
+type ListBookmarksByTitleRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByTitle(ctx context.Context, arg ListBookmarksByTitleParams) ([]ListBookmarksByTitleRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByTitle, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByTitleRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByTitleRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -267,15 +322,22 @@ type ListBookmarksByTitleDescParams struct {
 	Limit  int64 `json:"limit"`
 }
 
-func (q *Queries) ListBookmarksByTitleDesc(ctx context.Context, arg ListBookmarksByTitleDescParams) ([]Bookmark, error) {
+type ListBookmarksByTitleDescRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) ListBookmarksByTitleDesc(ctx context.Context, arg ListBookmarksByTitleDescParams) ([]ListBookmarksByTitleDescRow, error) {
 	rows, err := q.db.QueryContext(ctx, listBookmarksByTitleDesc, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Bookmark
+	var items []ListBookmarksByTitleDescRow
 	for rows.Next() {
-		var i Bookmark
+		var i ListBookmarksByTitleDescRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -302,12 +364,19 @@ UPDATE bookmarks SET url = ?, title = ? WHERE id = ? RETURNING id, url, title, c
 type UpdateBookmarkParams struct {
 	Url   string `json:"url"`
 	Title string `json:"title"`
-	ID    int64  `json:"id"`
+	ID    string `json:"id"`
 }
 
-func (q *Queries) UpdateBookmark(ctx context.Context, arg UpdateBookmarkParams) (Bookmark, error) {
+type UpdateBookmarkRow struct {
+	ID        string    `json:"id"`
+	Url       string    `json:"url"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Queries) UpdateBookmark(ctx context.Context, arg UpdateBookmarkParams) (UpdateBookmarkRow, error) {
 	row := q.db.QueryRowContext(ctx, updateBookmark, arg.Url, arg.Title, arg.ID)
-	var i Bookmark
+	var i UpdateBookmarkRow
 	err := row.Scan(
 		&i.ID,
 		&i.Url,

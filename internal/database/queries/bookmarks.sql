@@ -1,10 +1,10 @@
 -- name: CreateBookmark :one
-INSERT INTO bookmarks (url, title, created_at)
-VALUES (?, ?, ?)
-RETURNING *;
+INSERT INTO bookmarks (id, url, title, created_at)
+VALUES (?, ?, ?, ?)
+RETURNING id, url, title, created_at;
 
 -- name: GetBookmark :one
-SELECT * FROM bookmarks WHERE id = ?;
+SELECT id, url, title, created_at FROM bookmarks WHERE id = ?;
 
 -- name: ListBookmarksByID :many
 SELECT id, url, title, created_at FROM bookmarks ORDER BY id ASC LIMIT @limit OFFSET @offset;
@@ -28,7 +28,7 @@ SELECT id, url, title, created_at FROM bookmarks ORDER BY created_at DESC, id DE
 SELECT COUNT(*) FROM bookmarks;
 
 -- name: UpdateBookmark :one
-UPDATE bookmarks SET url = ?, title = ? WHERE id = ? RETURNING *;
+UPDATE bookmarks SET url = ?, title = ? WHERE id = ? RETURNING id, url, title, created_at;
 
 -- name: DeleteBookmark :execrows
 DELETE FROM bookmarks WHERE id = ?;

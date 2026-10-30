@@ -5,19 +5,21 @@
 package dbgen
 
 import (
+	"database/sql"
 	"time"
 )
 
 type Bookmark struct {
-	ID        int64     `json:"id"`
-	Url       string    `json:"url"`
-	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string        `json:"id"`
+	Url       string        `json:"url"`
+	Title     string        `json:"title"`
+	CreatedAt time.Time     `json:"created_at"`
+	LegacyID  sql.NullInt64 `json:"legacy_id"`
 }
 
 type BookmarkTag struct {
-	BookmarkID int64 `json:"bookmark_id"`
-	TagID      int64 `json:"tag_id"`
+	BookmarkID string `json:"bookmark_id"`
+	TagID      int64  `json:"tag_id"`
 }
 
 type Tag struct {

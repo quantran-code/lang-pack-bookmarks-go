@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/quantran-code/lang-pack-bookmarks-go/internal/database/dbgen"
 )
@@ -60,7 +61,7 @@ func (r bookmarkRequest) validate() error {
 // bookmarkResponse is a bookmark as every endpoint answers with it: the stored columns plus the
 // bookmark's tags, sorted by name and never null.
 type bookmarkResponse struct {
-	ID        int64     `json:"id"`
+	ID        string    `json:"id"`
 	URL       string    `json:"url"`
 	Title     string    `json:"title"`
 	CreatedAt time.Time `json:"created_at"`
@@ -82,17 +83,25 @@ func toBookmarkResponse(b dbgen.Bookmark, tags []string) bookmarkResponse {
 	}
 }
 
+// bookmarkModel builds the shared Bookmark model from the four columns a bookmark response carries.
+// The queries that select exactly the table's columns already return the model; for a query sqlc
+// generated a per-query row type for, the same four columns are copied into the model here.
+func bookmarkModel(id, url, title string, createdAt time.Time) dbgen.Bookmark {
+	return dbgen.Bookmark{ID: id, Url: url, Title: title, CreatedAt: createdAt}
+}
+
 // bookmarkTags loads the tags of a single bookmark, ascending by name. It is used only where the
 // response covers one bookmark; listing loads every bookmark's tags in one query instead.
-func bookmarkTags(ctx context.Context, q *dbgen.Queries, id int64) ([]string, error) {
+func bookmarkTags(ctx context.Context, q *dbgen.Queries, id string) ([]string, error) {
 	tags, err := q.ListTagsForBookmark(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("listing tags for bookmark %d: %w", id, err)
+		return nil, fmt.Errorf("listing tags for bookmark %s: %w", id, err)
 	}
 	return tags, nil
 }
 
-// createBookmark handles POST /bookmarks.
+// createBookmark handles POST /bookmarks. The bookmark's id is a fresh UUID generated here, since
+// the database no longer invents one.
 func createBookmark(q *dbgen.Queries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req bookmarkRequest
@@ -106,6 +115,7 @@ func createBookmark(q *dbgen.Queries) http.HandlerFunc {
 		}
 
 		bookmark, err := q.CreateBookmark(r.Context(), dbgen.CreateBookmarkParams{
+			ID:        uuid.NewString(),
 			Url:       strings.TrimSpace(req.URL),
 			Title:     strings.TrimSpace(req.Title),
 			CreatedAt: time.Now().UTC(),
@@ -119,18 +129,19 @@ func createBookmark(q *dbgen.Queries) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "loading tags")
 			return
 		}
-		writeJSON(w, http.StatusCreated, toBookmarkResponse(bookmark, tags))
+		writeJSON(w, http.StatusCreated, toBookmarkResponse(bookmarkModel(bookmark.ID, bookmark.Url, bookmark.Title, bookmark.CreatedAt), tags))
 	}
 }
 
-// listBookmarks handles GET /bookmarks: one page of the bookmarks, sorted as the request asks, or —
-// when a valid ?tag= is given — one page of the bookmarks carrying that tag. The paging and
-// sorting parameters are validated before the tag is looked at, so a bad limit is a 400 even next
-// to an unusable tag. Every 200 answer carries X-Total-Count, the number of bookmarks matching the
-// filter before limit and offset are applied, and a JSON array body: the slice is made up front so
-// an empty result marshals as [] and not null. A tag value that is not a valid tag cannot match
-// anything, so it answers [] with a count of zero without running a query. Tags come from one query
-// for the whole table, so listing bookmarks never runs a query per bookmark.
+// listBookmarks handles GET /bookmarks: one page of the bookmarks, in created_at then id order
+// unless ?sort= asks for another order, or — when a valid ?tag= is given — one page of the
+// bookmarks carrying that tag. The paging and sorting parameters are validated before the tag is
+// looked at, so a bad limit is a 400 even next to an unusable tag. Every 200 answer carries
+// X-Total-Count, the number of bookmarks matching the filter before limit and offset are applied,
+// and a JSON array body: the slice is made up front so an empty result marshals as [] and not null.
+// A tag value that is not a valid tag cannot match anything, so it answers [] with a count of zero
+// without running a query. Tags come from one query for the whole table, so listing bookmarks never
+// runs a query per bookmark.
 func listBookmarks(q *dbgen.Queries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		params, err := parseListParams(r)
@@ -195,23 +206,71 @@ func bookmarksPage(ctx context.Context, q *dbgen.Queries, p listParams, tag stri
 		case sortByTitle:
 			switch p.Order {
 			case orderAsc:
-				return q.ListBookmarksByTagByTitle(ctx, dbgen.ListBookmarksByTagByTitleParams{Name: tag, Limit: limit, Offset: offset})
+				rows, err := q.ListBookmarksByTagByTitle(ctx, dbgen.ListBookmarksByTagByTitleParams{Name: tag, Limit: limit, Offset: offset})
+				if err != nil {
+					return nil, err
+				}
+				bookmarks := make([]dbgen.Bookmark, len(rows))
+				for i, row := range rows {
+					bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+				}
+				return bookmarks, nil
 			case orderDesc:
-				return q.ListBookmarksByTagByTitleDesc(ctx, dbgen.ListBookmarksByTagByTitleDescParams{Name: tag, Limit: limit, Offset: offset})
+				rows, err := q.ListBookmarksByTagByTitleDesc(ctx, dbgen.ListBookmarksByTagByTitleDescParams{Name: tag, Limit: limit, Offset: offset})
+				if err != nil {
+					return nil, err
+				}
+				bookmarks := make([]dbgen.Bookmark, len(rows))
+				for i, row := range rows {
+					bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+				}
+				return bookmarks, nil
 			}
 		case sortByCreatedAt:
 			switch p.Order {
 			case orderAsc:
-				return q.ListBookmarksByTagByCreatedAt(ctx, dbgen.ListBookmarksByTagByCreatedAtParams{Name: tag, Limit: limit, Offset: offset})
+				rows, err := q.ListBookmarksByTagByCreatedAt(ctx, dbgen.ListBookmarksByTagByCreatedAtParams{Name: tag, Limit: limit, Offset: offset})
+				if err != nil {
+					return nil, err
+				}
+				bookmarks := make([]dbgen.Bookmark, len(rows))
+				for i, row := range rows {
+					bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+				}
+				return bookmarks, nil
 			case orderDesc:
-				return q.ListBookmarksByTagByCreatedAtDesc(ctx, dbgen.ListBookmarksByTagByCreatedAtDescParams{Name: tag, Limit: limit, Offset: offset})
+				rows, err := q.ListBookmarksByTagByCreatedAtDesc(ctx, dbgen.ListBookmarksByTagByCreatedAtDescParams{Name: tag, Limit: limit, Offset: offset})
+				if err != nil {
+					return nil, err
+				}
+				bookmarks := make([]dbgen.Bookmark, len(rows))
+				for i, row := range rows {
+					bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+				}
+				return bookmarks, nil
 			}
 		case sortByID:
 			switch p.Order {
 			case orderAsc:
-				return q.ListBookmarksByTagByID(ctx, dbgen.ListBookmarksByTagByIDParams{Name: tag, Limit: limit, Offset: offset})
+				rows, err := q.ListBookmarksByTagByID(ctx, dbgen.ListBookmarksByTagByIDParams{Name: tag, Limit: limit, Offset: offset})
+				if err != nil {
+					return nil, err
+				}
+				bookmarks := make([]dbgen.Bookmark, len(rows))
+				for i, row := range rows {
+					bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+				}
+				return bookmarks, nil
 			case orderDesc:
-				return q.ListBookmarksByTagByIDDesc(ctx, dbgen.ListBookmarksByTagByIDDescParams{Name: tag, Limit: limit, Offset: offset})
+				rows, err := q.ListBookmarksByTagByIDDesc(ctx, dbgen.ListBookmarksByTagByIDDescParams{Name: tag, Limit: limit, Offset: offset})
+				if err != nil {
+					return nil, err
+				}
+				bookmarks := make([]dbgen.Bookmark, len(rows))
+				for i, row := range rows {
+					bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+				}
+				return bookmarks, nil
 			}
 		}
 		return nil, fmt.Errorf("unsupported listing of tag %q: sort %q, order %q", tag, p.Sort, p.Order)
@@ -221,23 +280,71 @@ func bookmarksPage(ctx context.Context, q *dbgen.Queries, p listParams, tag stri
 	case sortByTitle:
 		switch p.Order {
 		case orderAsc:
-			return q.ListBookmarksByTitle(ctx, dbgen.ListBookmarksByTitleParams{Limit: limit, Offset: offset})
+			rows, err := q.ListBookmarksByTitle(ctx, dbgen.ListBookmarksByTitleParams{Limit: limit, Offset: offset})
+			if err != nil {
+				return nil, err
+			}
+			bookmarks := make([]dbgen.Bookmark, len(rows))
+			for i, row := range rows {
+				bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+			}
+			return bookmarks, nil
 		case orderDesc:
-			return q.ListBookmarksByTitleDesc(ctx, dbgen.ListBookmarksByTitleDescParams{Limit: limit, Offset: offset})
+			rows, err := q.ListBookmarksByTitleDesc(ctx, dbgen.ListBookmarksByTitleDescParams{Limit: limit, Offset: offset})
+			if err != nil {
+				return nil, err
+			}
+			bookmarks := make([]dbgen.Bookmark, len(rows))
+			for i, row := range rows {
+				bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+			}
+			return bookmarks, nil
 		}
 	case sortByCreatedAt:
 		switch p.Order {
 		case orderAsc:
-			return q.ListBookmarksByCreatedAt(ctx, dbgen.ListBookmarksByCreatedAtParams{Limit: limit, Offset: offset})
+			rows, err := q.ListBookmarksByCreatedAt(ctx, dbgen.ListBookmarksByCreatedAtParams{Limit: limit, Offset: offset})
+			if err != nil {
+				return nil, err
+			}
+			bookmarks := make([]dbgen.Bookmark, len(rows))
+			for i, row := range rows {
+				bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+			}
+			return bookmarks, nil
 		case orderDesc:
-			return q.ListBookmarksByCreatedAtDesc(ctx, dbgen.ListBookmarksByCreatedAtDescParams{Limit: limit, Offset: offset})
+			rows, err := q.ListBookmarksByCreatedAtDesc(ctx, dbgen.ListBookmarksByCreatedAtDescParams{Limit: limit, Offset: offset})
+			if err != nil {
+				return nil, err
+			}
+			bookmarks := make([]dbgen.Bookmark, len(rows))
+			for i, row := range rows {
+				bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+			}
+			return bookmarks, nil
 		}
 	case sortByID:
 		switch p.Order {
 		case orderAsc:
-			return q.ListBookmarksByID(ctx, dbgen.ListBookmarksByIDParams{Limit: limit, Offset: offset})
+			rows, err := q.ListBookmarksByID(ctx, dbgen.ListBookmarksByIDParams{Limit: limit, Offset: offset})
+			if err != nil {
+				return nil, err
+			}
+			bookmarks := make([]dbgen.Bookmark, len(rows))
+			for i, row := range rows {
+				bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+			}
+			return bookmarks, nil
 		case orderDesc:
-			return q.ListBookmarksByIDDesc(ctx, dbgen.ListBookmarksByIDDescParams{Limit: limit, Offset: offset})
+			rows, err := q.ListBookmarksByIDDesc(ctx, dbgen.ListBookmarksByIDDescParams{Limit: limit, Offset: offset})
+			if err != nil {
+				return nil, err
+			}
+			bookmarks := make([]dbgen.Bookmark, len(rows))
+			for i, row := range rows {
+				bookmarks[i] = bookmarkModel(row.ID, row.Url, row.Title, row.CreatedAt)
+			}
+			return bookmarks, nil
 		}
 	}
 	return nil, fmt.Errorf("unsupported listing: sort %q, order %q", p.Sort, p.Order)
@@ -262,12 +369,12 @@ func countBookmarks(ctx context.Context, q *dbgen.Queries, tag string, filtered 
 
 // loadAllBookmarkTags loads every bookmark's tags in one query, grouped by bookmark id. The names
 // inside each group are already ascending because the query orders by bookmark id and tag name.
-func loadAllBookmarkTags(ctx context.Context, q *dbgen.Queries) (map[int64][]string, error) {
+func loadAllBookmarkTags(ctx context.Context, q *dbgen.Queries) (map[string][]string, error) {
 	rows, err := q.ListAllBookmarkTags(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing bookmark tags: %w", err)
 	}
-	tags := make(map[int64][]string, len(rows))
+	tags := make(map[string][]string, len(rows))
 	for _, row := range rows {
 		tags[row.BookmarkID] = append(tags[row.BookmarkID], row.Name)
 	}
@@ -276,7 +383,8 @@ func loadAllBookmarkTags(ctx context.Context, q *dbgen.Queries) (map[int64][]str
 
 // updateBookmark handles PUT /bookmarks/{id}: it replaces an existing bookmark's url and title and
 // answers with the updated bookmark. The id is parsed and the bookmark loaded before the body is
-// read, so a missing bookmark is a 404 even when the body is malformed or fails validation.
+// read, so a path value that is not a UUID is a 400, and a UUID that is not stored is a 404 even
+// when the body is malformed or fails validation.
 func updateBookmark(q *dbgen.Queries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := parseBookmarkID(r)
@@ -321,7 +429,7 @@ func updateBookmark(q *dbgen.Queries) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "loading tags")
 			return
 		}
-		writeJSON(w, http.StatusOK, toBookmarkResponse(bookmark, tags))
+		writeJSON(w, http.StatusOK, toBookmarkResponse(bookmarkModel(bookmark.ID, bookmark.Url, bookmark.Title, bookmark.CreatedAt), tags))
 	}
 }
 
@@ -349,17 +457,19 @@ func deleteBookmark(q *dbgen.Queries) http.HandlerFunc {
 	}
 }
 
-// parseBookmarkID reads the {id} path parameter of a bookmark route. A non-numeric or non-positive
-// id is an error.
-func parseBookmarkID(r *http.Request) (int64, error) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || id < 1 {
-		return 0, errors.New("invalid bookmark id")
+// parseBookmarkID reads the {id} path parameter of a bookmark route and returns it as the UUID
+// string bookmarks are stored under. A value that is not a UUID is an error; whether a UUID that is
+// well formed exists is settled by the query that looks it up.
+func parseBookmarkID(r *http.Request) (string, error) {
+	id := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(id); err != nil {
+		return "", errors.New("invalid bookmark id")
 	}
 	return id, nil
 }
 
-// getBookmark handles GET /bookmarks/{id}. A non-numeric id is a 400, a missing bookmark a 404.
+// getBookmark handles GET /bookmarks/{id}. A path value that is not a UUID is a 400, a UUID that is
+// not stored a 404.
 func getBookmark(q *dbgen.Queries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := parseBookmarkID(r)
@@ -382,6 +492,6 @@ func getBookmark(q *dbgen.Queries) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "loading tags")
 			return
 		}
-		writeJSON(w, http.StatusOK, toBookmarkResponse(bookmark, tags))
+		writeJSON(w, http.StatusOK, toBookmarkResponse(bookmarkModel(bookmark.ID, bookmark.Url, bookmark.Title, bookmark.CreatedAt), tags))
 	}
 }

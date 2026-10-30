@@ -73,10 +73,13 @@ var writeRateLimitSpecs = Describe("POST /bookmarks rate limit", func() {
 
 	Describe("the routes that are never limited", func() {
 		var router http.Handler
+		var id string
 
 		BeforeEach(func() {
 			router = newTestRouterWithConfig(Config{WriteRateLimit: 1})
-			Expect(doFrom(router, http.MethodPost, "/bookmarks", writableBody, writeAddress, nil).Code).To(Equal(http.StatusCreated))
+			rec := doFrom(router, http.MethodPost, "/bookmarks", writableBody, writeAddress, nil)
+			Expect(rec.Code).To(Equal(http.StatusCreated))
+			id = createdBookmarkID(rec)
 		})
 
 		It("serves GET /bookmarks and GET /bookmarks/{id} with the budget spent", func() {
@@ -85,7 +88,7 @@ var writeRateLimitSpecs = Describe("POST /bookmarks rate limit", func() {
 				Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
 			}
 
-			rec := doFrom(router, http.MethodGet, "/bookmarks/1", "", writeAddress, nil)
+			rec := doFrom(router, http.MethodGet, "/bookmarks/"+id, "", writeAddress, nil)
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
 			Expect(rec.Body.String()).To(ContainSubstring(`"title":"Go"`))
 		})

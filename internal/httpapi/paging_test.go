@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -23,28 +24,46 @@ func totalCount(rec *httptest.ResponseRecorder) int {
 }
 
 // listedIDs returns the ids of the bookmarks in a listing response body, in the order they appear.
-func listedIDs(body []byte) []int64 {
+func listedIDs(body []byte) []string {
 	var bookmarks []bookmarkResponse
 	Expect(json.Unmarshal(body, &bookmarks)).To(Succeed())
-	ids := make([]int64, 0, len(bookmarks))
+	ids := make([]string, 0, len(bookmarks))
 	for _, bookmark := range bookmarks {
 		ids = append(ids, bookmark.ID)
 	}
 	return ids
 }
 
+// sortedIDs returns ids in the order the id column compares them: as text.
+func sortedIDs(ids []string) []string {
+	sorted := append([]string(nil), ids...)
+	sort.Strings(sorted)
+	return sorted
+}
+
+// reversedIDs returns ids back to front.
+func reversedIDs(ids []string) []string {
+	reversed := make([]string, 0, len(ids))
+	for i := len(ids) - 1; i >= 0; i-- {
+		reversed = append(reversed, ids[i])
+	}
+	return reversed
+}
+
 // seedBookmarks creates one bookmark per title, in order, and fails the spec if any is rejected.
 // Every bookmark gets its own valid url, so the titles are the only part the caller cares about.
 func seedBookmarks(router http.Handler, titles ...string) {
+	seedBookmarkIDs(router, titles...)
+}
+
+// seedBookmarkIDs creates one bookmark per title, in order, and returns their ids in creation
+// order, which is the order the default listing answers in.
+func seedBookmarkIDs(router http.Handler, titles ...string) []string {
+	ids := make([]string, 0, len(titles))
 	for i, title := range titles {
-		body, err := json.Marshal(map[string]string{
-			"url":   fmt.Sprintf("https://example.com/%d", i+1),
-			"title": title,
-		})
-		Expect(err).NotTo(HaveOccurred())
-		rec := do(router, http.MethodPost, "/bookmarks", string(body))
-		Expect(rec.Code).To(Equal(http.StatusCreated), rec.Body.String())
+		ids = append(ids, postBookmark(router, fmt.Sprintf("https://example.com/%d", i+1), title))
 	}
+	return ids
 }
 
 var _ = Describe("GET /bookmarks paging, sorting and X-Total-Count", func() {
@@ -55,39 +74,36 @@ var _ = Describe("GET /bookmarks paging, sorting and X-Total-Count", func() {
 	})
 
 	Describe("the default page", func() {
-		It("answers 20 bookmarks in id order and the total before paging", func() {
+		It("answers 20 bookmarks in created_at then id order and the total before paging", func() {
 			titles := make([]string, 0, 25)
 			for i := 1; i <= 25; i++ {
 				titles = append(titles, fmt.Sprintf("bookmark-%02d", i))
 			}
-			seedBookmarks(router, titles...)
+			ids := seedBookmarkIDs(router, titles...)
 
 			rec := do(router, http.MethodGet, "/bookmarks", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
 			Expect(totalCount(rec)).To(Equal(25))
-
-			want := make([]int64, 0, 20)
-			for id := int64(1); id <= 20; id++ {
-				want = append(want, id)
-			}
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal(want))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(ids[:20]))
 		})
 	})
 
 	Describe("limit", func() {
+		var ids []string
+
 		BeforeEach(func() {
-			seedBookmarks(router, "first", "second", "third")
+			ids = seedBookmarkIDs(router, "first", "second", "third")
 		})
 
 		DescribeTable("pages the listing and leaves the total alone",
-			func(query string, wantIDs []int64) {
+			func(query string, want int) {
 				rec := do(router, http.MethodGet, "/bookmarks?"+query, "")
 				Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-				Expect(listedIDs(rec.Body.Bytes())).To(Equal(wantIDs))
+				Expect(listedIDs(rec.Body.Bytes())).To(Equal(ids[:want]))
 				Expect(totalCount(rec)).To(Equal(3))
 			},
-			Entry("limit 1", "limit=1", []int64{1}),
-			Entry("limit 100 is the largest accepted", "limit=100", []int64{1, 2, 3}),
+			Entry("limit 1", "limit=1", 1),
+			Entry("limit 100 is the largest accepted", "limit=100", 3),
 		)
 
 		DescribeTable("rejects a value outside 1 to 100",
@@ -105,14 +121,16 @@ var _ = Describe("GET /bookmarks paging, sorting and X-Total-Count", func() {
 	})
 
 	Describe("offset", func() {
+		var ids []string
+
 		BeforeEach(func() {
-			seedBookmarks(router, "first", "second", "third")
+			ids = seedBookmarkIDs(router, "first", "second", "third")
 		})
 
 		It("pages past the first bookmarks", func() {
 			rec := do(router, http.MethodGet, "/bookmarks?limit=2&offset=1", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{2, 3}))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(ids[1:]))
 			Expect(totalCount(rec)).To(Equal(3))
 		})
 
@@ -136,87 +154,118 @@ var _ = Describe("GET /bookmarks paging, sorting and X-Total-Count", func() {
 	})
 
 	Describe("sort by title", func() {
+		var ids []string
+
 		BeforeEach(func() {
 			// Zebra sorts before apple in SQLite's default BINARY collation, which is what the
 			// ticket asks for: byte order, not a case-insensitive one.
-			seedBookmarks(router, "apple", "Zebra")
+			ids = seedBookmarkIDs(router, "apple", "Zebra")
 		})
 
 		It("orders titles case-sensitively", func() {
 			rec := do(router, http.MethodGet, "/bookmarks?sort=title", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{2, 1}))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]string{ids[1], ids[0]}))
 		})
 
 		It("reverses that order for order=desc", func() {
 			rec := do(router, http.MethodGet, "/bookmarks?sort=title&order=desc", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{1, 2}))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]string{ids[0], ids[1]}))
 		})
 	})
 
 	Describe("sort by title with a shared title", func() {
+		var ids []string
+
 		BeforeEach(func() {
-			seedBookmarks(router, "same", "same", "same")
+			ids = seedBookmarkIDs(router, "same", "same", "same")
 		})
 
 		It("breaks the tie on id ascending", func() {
 			rec := do(router, http.MethodGet, "/bookmarks?sort=title", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{1, 2, 3}))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(sortedIDs(ids)))
 		})
 
 		It("breaks the tie on id descending", func() {
 			rec := do(router, http.MethodGet, "/bookmarks?sort=title&order=desc", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{3, 2, 1}))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(reversedIDs(sortedIDs(ids))))
 		})
 	})
 
 	Describe("sort by created_at", func() {
+		var ids []string
+
 		BeforeEach(func() {
-			seedBookmarks(router, "first", "second", "third")
+			ids = seedBookmarkIDs(router, "first", "second", "third")
 		})
 
 		It("answers insertion order", func() {
 			rec := do(router, http.MethodGet, "/bookmarks?sort=created_at", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{1, 2, 3}))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(ids))
 			Expect(totalCount(rec)).To(Equal(3))
 		})
 
 		It("answers the reverse for order=desc", func() {
 			rec := do(router, http.MethodGet, "/bookmarks?sort=created_at&order=desc", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{3, 2, 1}))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(reversedIDs(ids)))
 			Expect(totalCount(rec)).To(Equal(3))
 		})
 	})
 
 	Describe("sort by created_at with one timestamp on every bookmark", func() {
 		var db *sql.DB
+		var ids []string
 
 		BeforeEach(func() {
 			// The API never lets a client set created_at, so two rows can only share a timestamp
 			// when a spec writes it straight to the database; the tie-break on id is otherwise
 			// unreachable over HTTP.
 			router, db = newTestRouterWithDB()
-			seedBookmarks(router, "first", "second", "third")
+			ids = seedBookmarkIDs(router, "first", "second", "third")
 
-			_, err := db.Exec("UPDATE bookmarks SET created_at = (SELECT created_at FROM bookmarks WHERE id = 1)")
+			_, err := db.Exec("UPDATE bookmarks SET created_at = (SELECT created_at FROM bookmarks WHERE id = ?)", ids[0])
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("breaks the tie on id ascending", func() {
-			rec := do(router, http.MethodGet, "/bookmarks?sort=created_at", "")
-			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{1, 2, 3}))
+		It("breaks the tie on id ascending, with or without an explicit sort", func() {
+			for _, target := range []string{"/bookmarks", "/bookmarks?sort=created_at"} {
+				rec := do(router, http.MethodGet, target, "")
+				Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+				Expect(listedIDs(rec.Body.Bytes())).To(Equal(sortedIDs(ids)), target)
+			}
 		})
 
 		It("breaks the tie on id descending", func() {
 			rec := do(router, http.MethodGet, "/bookmarks?sort=created_at&order=desc", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{3, 2, 1}))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(reversedIDs(sortedIDs(ids))))
+		})
+	})
+
+	Describe("sort by id", func() {
+		var ids []string
+
+		BeforeEach(func() {
+			ids = seedBookmarkIDs(router, "first", "second", "third")
+		})
+
+		It("orders the UUID text lexicographically", func() {
+			rec := do(router, http.MethodGet, "/bookmarks?sort=id", "")
+			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(sortedIDs(ids)))
+			Expect(totalCount(rec)).To(Equal(3))
+		})
+
+		It("reverses that order for order=desc", func() {
+			rec := do(router, http.MethodGet, "/bookmarks?sort=id&order=desc", "")
+			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(reversedIDs(sortedIDs(ids))))
+			Expect(totalCount(rec)).To(Equal(3))
 		})
 	})
 
@@ -257,24 +306,26 @@ var _ = Describe("GET /bookmarks paging, sorting and X-Total-Count", func() {
 	})
 
 	Describe("with a tag filter", func() {
+		var ids []string
+
 		BeforeEach(func() {
-			seedBookmarks(router, "first", "second", "third")
-			Expect(do(router, http.MethodPut, "/bookmarks/1/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
-			Expect(do(router, http.MethodPut, "/bookmarks/2/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
-			Expect(do(router, http.MethodPut, "/bookmarks/3/tags", tagsBody("chi")).Code).To(Equal(http.StatusOK))
+			ids = seedBookmarkIDs(router, "first", "second", "third")
+			Expect(do(router, http.MethodPut, "/bookmarks/"+ids[0]+"/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
+			Expect(do(router, http.MethodPut, "/bookmarks/"+ids[1]+"/tags", tagsBody("go")).Code).To(Equal(http.StatusOK))
+			Expect(do(router, http.MethodPut, "/bookmarks/"+ids[2]+"/tags", tagsBody("chi")).Code).To(Equal(http.StatusOK))
 		})
 
 		It("pages and counts only the bookmarks carrying the tag", func() {
 			rec := do(router, http.MethodGet, "/bookmarks?tag=go&limit=1&offset=1", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{2}))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(ids[1:2]))
 			Expect(totalCount(rec)).To(Equal(2))
 		})
 
 		It("sorts only the bookmarks carrying the tag", func() {
 			rec := do(router, http.MethodGet, "/bookmarks?tag=go&sort=id&order=desc", "")
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
-			Expect(listedIDs(rec.Body.Bytes())).To(Equal([]int64{2, 1}))
+			Expect(listedIDs(rec.Body.Bytes())).To(Equal(reversedIDs(sortedIDs(ids[:2]))))
 			Expect(totalCount(rec)).To(Equal(2))
 		})
 

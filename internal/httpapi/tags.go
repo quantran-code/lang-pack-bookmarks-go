@@ -66,8 +66,9 @@ func normalizeTags(tags []string) ([]string, error) {
 
 // replaceBookmarkTags handles PUT /bookmarks/{id}/tags: it replaces the bookmark's whole tag set
 // with the one in the body and answers with the bookmark. The id is parsed and the bookmark loaded
-// before the body is read, so a missing bookmark is a 404 even when the body is malformed. The
-// replacement runs in one transaction, so a failure leaves the previous tags in place.
+// before the body is read, so a path value that is not a UUID is a 400 and a UUID that is not
+// stored is a 404, both even when the body is malformed. The replacement runs in one transaction,
+// so a failure leaves the previous tags in place.
 func replaceBookmarkTags(q *dbgen.Queries, db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := parseBookmarkID(r)
@@ -145,6 +146,6 @@ func replaceBookmarkTags(q *dbgen.Queries, db *sql.DB) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "loading tags")
 			return
 		}
-		writeJSON(w, http.StatusOK, toBookmarkResponse(bookmark, storedTags))
+		writeJSON(w, http.StatusOK, toBookmarkResponse(bookmarkModel(bookmark.ID, bookmark.Url, bookmark.Title, bookmark.CreatedAt), storedTags))
 	}
 }

@@ -17,11 +17,11 @@ const (
 type sortField string
 
 const (
-	// sortByID sorts by bookmark id, the default.
+	// sortByID sorts by the bookmark's UUID id, compared as text.
 	sortByID sortField = "id"
 	// sortByTitle sorts by title, compared with SQLite's default BINARY collation.
 	sortByTitle sortField = "title"
-	// sortByCreatedAt sorts by the creation timestamp.
+	// sortByCreatedAt sorts by the creation timestamp, the default.
 	sortByCreatedAt sortField = "created_at"
 )
 
@@ -64,7 +64,7 @@ func parseListParams(r *http.Request) (listParams, error) {
 	params := listParams{
 		Limit:  defaultLimit,
 		Offset: 0,
-		Sort:   sortByID,
+		Sort:   sortByCreatedAt,
 		Order:  orderAsc,
 	}
 
