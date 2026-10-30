@@ -19,9 +19,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	cfg, err := httpapi.ConfigFromEnv()
+	if err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	log.Fatal(http.ListenAndServe(":"+port, httpapi.NewRouter(db)))
+	log.Fatal(http.ListenAndServe(":"+port, httpapi.NewRouter(db, cfg)))
 }

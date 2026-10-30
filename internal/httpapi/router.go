@@ -4,7 +4,10 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -29,9 +32,38 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, errorBody{Error: message})
 }
 
+// Config is what the router needs on top of the database.
+type Config struct {
+	// WriteRateLimit is the number of POST /bookmarks requests one client IP may make in any
+	// rolling 60-second window. Zero or less turns limiting off.
+	WriteRateLimit int
+}
+
+// DefaultWriteRateLimit is the write rate limit used when WRITE_RATE_LIMIT is unset.
+const DefaultWriteRateLimit = 60
+
+// ConfigFromEnv reads the configuration from the environment. WRITE_RATE_LIMIT holds the number of
+// POST /bookmarks requests one client IP may make per minute: unset or empty means
+// DefaultWriteRateLimit, and zero or a negative number is returned as given, which turns limiting
+// off. A value that is not an integer is an error.
+func ConfigFromEnv() (Config, error) {
+	cfg := Config{WriteRateLimit: DefaultWriteRateLimit}
+
+	raw := os.Getenv("WRITE_RATE_LIMIT")
+	if raw == "" {
+		return cfg, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil {
+		return Config{}, fmt.Errorf("WRITE_RATE_LIMIT %q is not an integer: %w", raw, err)
+	}
+	cfg.WriteRateLimit = limit
+	return cfg, nil
+}
+
 // NewRouter builds the chi router with every route registered. Paths chi does not match and
 // methods it does not allow are answered in the same error shape.
-func NewRouter(db *sql.DB) http.Handler {
+func NewRouter(db *sql.DB, cfg Config) http.Handler {
 	queries := dbgen.New(db)
 
 	r := chi.NewRouter()
@@ -48,7 +80,7 @@ func NewRouter(db *sql.DB) http.Handler {
 	})
 
 	r.Route("/bookmarks", func(r chi.Router) {
-		r.Post("/", createBookmark(queries))
+		r.With(writeRateLimiter(cfg.WriteRateLimit)).Post("/", createBookmark(queries))
 		r.Get("/", listBookmarks(queries))
 		r.Get("/{id}", getBookmark(queries))
 		r.Put("/{id}", updateBookmark(queries))
